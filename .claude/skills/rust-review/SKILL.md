@@ -68,13 +68,12 @@ and best practices.
 - [ ] Unsafe boundary is as small as possible
 - [ ] Safe alternatives have been considered
 
-### Async / Concurrency
+### Concurrency
 
-- [ ] No blocking in async (`std::fs`, `thread::sleep`)
-- [ ] No `std::sync` lock held across `.await`
-- [ ] Spawned tasks satisfy `'static`
 - [ ] Lock acquisition order is consistent
 - [ ] Channel buffer sizes are reasonable
+- [ ] `JoinHandle` results are handled properly
+- [ ] `join!` / `try_join!` preferred for structured concurrency
 
 ### Cancellation Safety
 
@@ -82,14 +81,6 @@ and best practices.
 - [ ] Async functions document their cancel safety
 - [ ] Cancellation does not cause data loss or inconsistent state
 - [ ] `tokio::pin!` is used correctly for futures that need reuse
-
-### spawn vs await
-
-- [ ] `spawn` is only used for genuinely parallel workloads
-- [ ] Simple operations are awaited directly, not spawned
-- [ ] `JoinHandle` results are handled properly
-- [ ] Task lifecycle and shutdown strategy are considered
-- [ ] `join!` / `try_join!` preferred for structured concurrency
 
 ### Error Handling
 
@@ -117,11 +108,21 @@ and best practices.
 - [ ] Tests cover boundary conditions
 - [ ] Public APIs have documented examples
 
+### Async
+
+- [ ] No blocking in async (`std::fs`, `thread::sleep`)
+- [ ] No `std::sync` lock held across `.await`
+- [ ] Spawned tasks satisfy `'static`
+- [ ] `spawn` is only used for genuinely parallel workloads
+- [ ] Simple operations are awaited directly, not spawned
+- [ ] Task lifecycle and shutdown strategy are considered
 
 ## Cargo review
 Based on analysis of Cargo.toml and the resulting Cargo.lock
 
 ### Unnecessary dependencies
+Identify dependencies that are unused, or are only used in certain situations (dev, test, features) but they are
+not marked as optional.
 
 ### Dependencies could be combined
 The resulting set of dependencies in Cargo.lock has multiple versions of the same crate that could be combined by
