@@ -302,6 +302,163 @@ pub fn safe_wrapper(data: &[u8]) -> Result<i32, Error> {
 }
 ```
 
+## Error Handling
+
+### Library vs application error types
+
+- **Libraries** should use `thiserror` to define structured, matchable error types.
+- **Applications** should use `anyhow` with `.context()` for ergonomic error propagation.
+
+```rust
+// BAD: library using anyhow -- callers cannot match on error variants
+pub fn parse_config(s: &str) -> anyhow::Result<Config> { /* ... */ }
+
+// GOOD: library with thiserror
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("invalid syntax at line {line}: {message}")]
+    Syntax { line: usize, message: String },
+    #[error("missing required field: {0}")]
+    MissingField(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+pub fn parse_config(s: &str) -> Result<Config, ConfigError> { /* ... */ }
+```
+
+### Preserve error context
+
+```rust
+// BAD: original error is lost
+operation().map_err(|_| anyhow!("failed"))?;
+
+// GOOD: use .context() to preserve the error chain
+operation().context("failed to perform operation")?;
+
+// GOOD: use .with_context() for lazy formatting
+operation().with_context(|| format!("failed to process file: {}", filename))?;
+```
+
+### Error type design
+
+- Use `#[source]` to preserve the error chain.
+- Implement `From` for common conversions.
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceError {
+    #[error("database error")]
+    Database(#[source] sqlx::Error),
+
+    #[error("network error: {message}")]
+    Network {
+        message: String,
+        #[source]
+        source: reqwest::Error,
+    },
+
+    #[error("validation failed: {0}")]
+    Validation(String),
+}
+```
+
+---
+
+## Performance
+
+### Avoid unnecessary collect()
+
+Do not materialize an intermediate `Vec` only to iterate over it again. Use lazy iterator chains.
+
+```rust
+// BAD: unnecessary intermediate allocation
+items.iter().filter(|x| **x > 0).collect::<Vec<_>>().iter().sum()
+
+// GOOD: lazy iteration
+items.iter().filter(|x| **x > 0).copied().sum()
+```
+
+### String concatenation
+
+Avoid repeated allocations in loops. Use `.join("")`, `String::with_capacity`, or `write!`.
+
+```rust
+// BAD: re-allocates on every iteration
+let mut s = String::new();
+for item in items { s = s + item; }
+
+// GOOD: join
+items.join("")
+
+// GOOD: pre-allocate
+let total_len: usize = items.iter().map(|s| s.len()).sum();
+let mut result = String::with_capacity(total_len);
+for item in items { result.push_str(item); }
+```
+
+### Avoid unnecessary String usage
+
+Strings are allocation son the HEAP. Avoid using a string when a &str can suffice. If they are constant then
+&'staic str to have them in the text segment and not allocated.
+
+### Avoid unnecessary allocations
+
+```rust
+// BAD: allocating a Vec just to check if any element matches
+let filtered: Vec<_> = items.iter().filter(|i| i.is_valid()).collect();
+!filtered.is_empty()
+
+// GOOD: use iterator method
+items.iter().any(|i| i.is_valid())
+
+// BAD: String::from for a static string when no owned String is needed
+fn bad_static() -> String { String::from("error message") }
+
+// GOOD: return &'static str
+fn good_static() -> &'static str { "error message" }
+```
+
+---
+
+## Trait Design
+
+### Avoid over-abstraction
+
+Do not create traits for everything. Concrete types are simpler and faster. Only introduce a trait when genuine
+polymorphism is required.
+
+```rust
+// BAD: trait soup -- not Java, no need to interface everything
+trait Processor { fn process(&self); }
+trait Handler { fn handle(&self); }
+trait Manager { fn manage(&self); }
+
+// GOOD: concrete type when polymorphism is not needed
+struct DataProcessor { config: Config }
+impl DataProcessor {
+    fn process(&self, data: &Data) -> Result<Output> { /* ... */ }
+}
+```
+
+### Trait objects vs generics
+
+- Use **generics** (static dispatch) by default for performance and inlining.
+- Use **trait objects** (`dyn Trait`) when you need heterogeneous collections or dynamic dispatch is required.
+- Use `impl Trait` in return position when the concrete type is not important to the caller.
+
+```rust
+// Prefer generics
+fn good_process<H: Handler>(handler: &H) { handler.handle(); }
+
+// Trait objects for heterogeneous collections
+fn store_handlers(handlers: Vec<Box<dyn Handler>>) { /* ... */ }
+
+// impl Trait return type
+fn create_handler() -> impl Handler { ConcreteHandler::new() }
+```
+
+
 ## Async Code
 
 ### Avoid blocking operations in async context
@@ -535,161 +692,3 @@ tokio::try_join!(fetch_a(), fetch_b(), fetch_c())
 ```
 
 When using `spawn`, consider the task lifecycle and have a shutdown strategy (graceful wait or abort).
-
----
-
-## Error Handling
-
-### Library vs application error types
-
-- **Libraries** should use `thiserror` to define structured, matchable error types.
-- **Applications** should use `anyhow` with `.context()` for ergonomic error propagation.
-
-```rust
-// BAD: library using anyhow -- callers cannot match on error variants
-pub fn parse_config(s: &str) -> anyhow::Result<Config> { /* ... */ }
-
-// GOOD: library with thiserror
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("invalid syntax at line {line}: {message}")]
-    Syntax { line: usize, message: String },
-    #[error("missing required field: {0}")]
-    MissingField(String),
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
-
-pub fn parse_config(s: &str) -> Result<Config, ConfigError> { /* ... */ }
-```
-
-### Preserve error context
-
-```rust
-// BAD: original error is lost
-operation().map_err(|_| anyhow!("failed"))?;
-
-// GOOD: use .context() to preserve the error chain
-operation().context("failed to perform operation")?;
-
-// GOOD: use .with_context() for lazy formatting
-operation().with_context(|| format!("failed to process file: {}", filename))?;
-```
-
-### Error type design
-
-- Use `#[source]` to preserve the error chain.
-- Implement `From` for common conversions.
-
-```rust
-#[derive(Debug, thiserror::Error)]
-pub enum ServiceError {
-    #[error("database error")]
-    Database(#[source] sqlx::Error),
-
-    #[error("network error: {message}")]
-    Network {
-        message: String,
-        #[source]
-        source: reqwest::Error,
-    },
-
-    #[error("validation failed: {0}")]
-    Validation(String),
-}
-```
-
----
-
-## Performance
-
-### Avoid unnecessary collect()
-
-Do not materialize an intermediate `Vec` only to iterate over it again. Use lazy iterator chains.
-
-```rust
-// BAD: unnecessary intermediate allocation
-items.iter().filter(|x| **x > 0).collect::<Vec<_>>().iter().sum()
-
-// GOOD: lazy iteration
-items.iter().filter(|x| **x > 0).copied().sum()
-```
-
-### String concatenation
-
-Avoid repeated allocations in loops. Use `.join("")`, `String::with_capacity`, or `write!`.
-
-```rust
-// BAD: re-allocates on every iteration
-let mut s = String::new();
-for item in items { s = s + item; }
-
-// GOOD: join
-items.join("")
-
-// GOOD: pre-allocate
-let total_len: usize = items.iter().map(|s| s.len()).sum();
-let mut result = String::with_capacity(total_len);
-for item in items { result.push_str(item); }
-```
-
-### Avoid unnecessary String usage
-
-Strings are allocation son the HEAP. Avoid using a string when a &str can suffice. If they are constant then
-&'staic str to have them in the text segment and not allocated.
-
-### Avoid unnecessary allocations
-
-```rust
-// BAD: allocating a Vec just to check if any element matches
-let filtered: Vec<_> = items.iter().filter(|i| i.is_valid()).collect();
-!filtered.is_empty()
-
-// GOOD: use iterator method
-items.iter().any(|i| i.is_valid())
-
-// BAD: String::from for a static string when no owned String is needed
-fn bad_static() -> String { String::from("error message") }
-
-// GOOD: return &'static str
-fn good_static() -> &'static str { "error message" }
-```
-
----
-
-## Trait Design
-
-### Avoid over-abstraction
-
-Do not create traits for everything. Concrete types are simpler and faster. Only introduce a trait when genuine 
-polymorphism is required.
-
-```rust
-// BAD: trait soup -- not Java, no need to interface everything
-trait Processor { fn process(&self); }
-trait Handler { fn handle(&self); }
-trait Manager { fn manage(&self); }
-
-// GOOD: concrete type when polymorphism is not needed
-struct DataProcessor { config: Config }
-impl DataProcessor {
-    fn process(&self, data: &Data) -> Result<Output> { /* ... */ }
-}
-```
-
-### Trait objects vs generics
-
-- Use **generics** (static dispatch) by default for performance and inlining.
-- Use **trait objects** (`dyn Trait`) when you need heterogeneous collections or dynamic dispatch is required.
-- Use `impl Trait` in return position when the concrete type is not important to the caller.
-
-```rust
-// Prefer generics
-fn good_process<H: Handler>(handler: &H) { handler.handle(); }
-
-// Trait objects for heterogeneous collections
-fn store_handlers(handlers: Vec<Box<dyn Handler>>) { /* ... */ }
-
-// impl Trait return type
-fn create_handler() -> impl Handler { ConcreteHandler::new() }
-```
