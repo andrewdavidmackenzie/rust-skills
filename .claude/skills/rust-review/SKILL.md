@@ -24,7 +24,22 @@ Other sets of tiles the user can specify:
 Then review all files in the specified module recurseivly down, including files that are behind features and files
 that are referenced from elsewhere via a "path=" construct in module files
 
-rm ca   
+## Idiomatic Rust
+Key characteristics of idiomatic Rust include:
+
+- Embracing the Type System: Using enums and structs to model data, allowing the compiler to perform exhaustive 
+matching and catch missing cases automatically.
+- Functional Patterns: Preferring iterators, closures, and combinators (like map, filter, fold) over manual loops 
+to write concise and parallelizable code.
+- Error Handling: Utilizing Option and Result types with pattern matching (match, if let) and the ? operator 
+instead of exceptions or manual null checks.
+- Ownership and Borrowing: Writing code that works with the borrow checker to ensure memory safety without 
+garbage collection, avoiding manual memory management.
+- Trait-Based Design: Using traits for shared behavior and polymorphism instead of inheritance, and implementing 
+standard traits (like Display, Debug, From) to integrate with the ecosystem.
+- Tooling Compliance: Adhering to community standards such as cargo fmt for formatting and cargo clippy for style 
+and best practices.
+
 ## Review Checklist (Summary)
 
 ### Issues the compiler cannot catch
