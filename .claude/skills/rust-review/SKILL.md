@@ -17,11 +17,11 @@ By default, if the user doesn't specify otherwise, review all files that have ch
 committed yet.
 
 Other sets of tiles the user can specify:
-- a specific file (rust file name specified)
+- a specific file (Rust file name specified)
 - all files under a specified directory path (directory name supplied)
 - project: review all rust-related files (including Cargo.toml) in the project
-- a module name: find module(s) in the project that match the name. If mopre than one ask the user to clarify which.
-Then review all files in the specified module recurseivly down, including files that are behind features and files
+- a module name: find module(s) in the project that match the name. If more than one, ask the user to clarify which.
+Then review all files in the specified module recursively down, including files that are behind features and files
 that are referenced from elsewhere via a "path=" construct in module files
 
 ## Idiomatic Rust
@@ -29,7 +29,7 @@ Key characteristics of idiomatic Rust include:
 
 - Embracing the Type System: Using enums and structs to model data, allowing the compiler to perform exhaustive 
 matching and catch missing cases automatically.
-- Functional Patterns: Preferring iterators, closures, and combinators (like map, filter, fold) over manual loops 
+- Functional Patterns: Preferring iterators, closures, and combinators (like `map`, `filter`, `fold`) over manual loops 
 to write concise and parallelizable code.
 - Error Handling: Utilizing Option and Result types with pattern matching (match, if let) and the ? operator 
 instead of exceptions or manual null checks.
@@ -44,7 +44,7 @@ and best practices.
 
 ### Issues the compiler cannot catch
 
-- [ ] Boundary conditions handled correctly
+- [ ] Boundary conditions are handled correctly
 - [ ] State machine transitions are complete
 - [ ] Race conditions in concurrent scenarios
 - [ ] Public APIs are hard to misuse
@@ -118,19 +118,24 @@ and best practices.
 - [ ] Task lifecycle and shutdown strategy are considered
 
 ## Cargo review
-Based on analysis of Cargo.toml and the resulting Cargo.lock
+Based on analysis of Cargo.toml and the resulting `Cargo.lock`
 
 ### Unnecessary dependencies
-Identify dependencies that are unused, or are only used in certain situations (dev, test, features) but they are
+Identify dependencies that are unused or are only used in certain situations (dev, test, features, etc.), but they are
 not marked as optional.
 
 ### Dependencies could be combined
-The resulting set of dependencies in Cargo.lock has multiple versions of the same crate that could be combined by
-modifying versions of the crate or parents of the crate controlled by the corrent project.
+The resulting set of dependencies in `Cargo.lock` file has multiple versions of the same crate that could be combined by
+modifying versions of the crate or parents of the crate controlled by the current project.
 
 ### Similar Dependencies
-The project uses multiple dependencies of a similar nature (e.g. error handling) and code modifications could 
+The project uses multiple dependencies of a similar nature (e.g., error handling), and code modifications could 
 merge the dependencies into one reducing code size and build time.
+
+## Readability
+### Avoid "Magic Numbers"
+Avoid the use of literals for important constants as their meaning is opaque. Replace them with the equivalent
+constant definition, where the constant's name describes the number more, and with a comment on its definition if needed.
 
 ## Function level checks
 
@@ -158,15 +163,16 @@ succinctly capture the allowed states.
 
 ## Find errors at compile time
 ### Low use of types 
-Functions create and process "types" with specific meaning and use but they are represented by common types
-(e.g. Strings) that can be interchanged in function signatures and return types. Use strong types so that for example 
+Functions create and process "types" with specific meaning and use, but they are represented by common types
+(e.g., Strings) that can be interchanged in function signatures and return types. Use strong types so that, for example, 
 an IP address cannot be confused with a file path.
 
 ### TypeState pattern
-When a type has boolean or other flags within it to indicate it's state, and that is used to allow or deny certain
-operations (e.g. a Connection that has a "bound" or "connected" flag and sending data methods cannot be used unless
-in the "connected" state) then consider the use of generics and the typestate pattern to avoid use of the type
-when it is in the incorrect stage
+When a type has boolean or other flags within it to indicate its state, and that is used to allow or deny certain
+ operations, then consider the use of generics and the typestate pattern to avoid use of the type
+when it is in the incorrect stage.
+E.g., A Connection that has a "bound" or "connected" flag and sending data methods cannot be used unless
+in the "connected" state.
 
 ## Duplication
 ### Repeated functions
@@ -180,7 +186,7 @@ and that could be combined with the use of an additional parameter to vary the b
 
 ### Avoid unnecessary clone()
 
-`clone()` is "Rust's duct tape" -- used to bypass the borrow checker. During review, ask: is the clone necessary? 
+`clone()` is "Rust's duct tape" – used to bypass the borrow checker. During review, ask: is the clone necessary? 
 Could a borrow be used instead?
 
 - Flag `clone()` calls that lack a justifying comment.
@@ -280,7 +286,7 @@ unsafe fn bad_transmute<T, U>(t: T) -> U {
 /// - `T` must be a valid bit pattern for `U`
 /// - No references to `t` may exist after this call
 unsafe fn documented_transmute<T, U>(t: T) -> U {
-    // SAFETY: Caller guarantees size/alignment match and bit validity
+    // SAFETY: Caller guarantees size/alignment match and bit pattern validity
     std::mem::transmute(t)
 }
 ```
@@ -293,7 +299,7 @@ Prefer encapsulating unsafe code behind a safe public API that enforces the requ
 // GOOD: safe wrapper around unsafe
 pub fn checked_get(slice: &[u8], index: usize) -> Option<u8> {
     if index < slice.len() {
-        // SAFETY: bounds check performed above
+        // SAFETY: bound's check performed above
         Some(unsafe { *slice.get_unchecked(index) })
     } else {
         None
@@ -320,7 +326,7 @@ pub fn safe_wrapper(data: &[u8]) -> Result<i32, Error> {
 
 ## Error Handling
 
-### Library vs application error types
+### Library vs. application error types
 
 - **Libraries** should use `thiserror` to define structured, matchable error types.
 - **Applications** should use `anyhow` with `.context()` for ergonomic error propagation.
@@ -329,7 +335,7 @@ pub fn safe_wrapper(data: &[u8]) -> Result<i32, Error> {
 // BAD: library using anyhow -- callers cannot match on error variants
 pub fn parse_config(s: &str) -> anyhow::Result<Config> { /* ... */ }
 
-// GOOD: library with thiserror
+// GOOD: library with `thiserror` crate
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("invalid syntax at line {line}: {message}")]
@@ -415,8 +421,8 @@ for item in items { result.push_str(item); }
 
 ### Avoid unnecessary String usage
 
-Strings are allocation son the HEAP. Avoid using a string when a &str can suffice. If they are constant then
-&'staic str to have them in the text segment and not allocated.
+Strings are allocations on the HEAP. Avoid using a string when a &str can suffice. If they are constant, then
+&'static str to have them in the text segment and not allocated.
 
 ### Avoid unnecessary allocations
 
@@ -457,7 +463,7 @@ impl DataProcessor {
 }
 ```
 
-### Trait objects vs generics
+### Trait objects vs. generics
 
 - Use **generics** (static dispatch) by default for performance and inlining.
 - Use **trait objects** (`dyn Trait`) when you need heterogeneous collections or dynamic dispatch is required.
@@ -565,7 +571,7 @@ When a Future is dropped at an `.await` point, what state is it in?
 - **Cancel-unsafe Future**: cancellation may cause data loss or inconsistent state.
 
 ```rust
-// BAD: cancel-unsafe -- if cancelled after receive_data, ack is never sent
+// BAD: cancel-unsafe - if it is canceled after receive_data, ack is never sent
 async fn cancel_unsafe(conn: &mut Connection) -> Result<()> {
     let data = receive_data().await;
     conn.send_ack().await;
@@ -626,7 +632,7 @@ Every public async function should document its cancel safety behavior:
 ```rust
 /// # Cancel Safety
 ///
-/// This method is **not** cancel safe. If cancelled while reading,
+/// This method is **not** cancel safe. If it is canceled while reading,
 /// partial data may be lost and the stream state becomes undefined.
 /// Use `read_message_cancel_safe` if cancellation is expected.
 async fn read_message(stream: &mut TcpStream) -> Result<Message> { /* ... */ }
@@ -634,11 +640,11 @@ async fn read_message(stream: &mut TcpStream) -> Result<Message> { /* ... */ }
 
 ---
 
-## spawn vs await
+## spawn vs. await
 
 ### When to use spawn
 
-- Do **not** spawn simple operations that can be directly awaited -- spawning adds overhead and loses structured 
+- Do **not** spawn simple operations that can be directly awaited – spawning adds overhead and loses structured 
 concurrency.
 - Use `spawn` for truly parallel execution (multiple independent I/O operations).
 - Use `spawn` for fire-and-forget background tasks.
@@ -648,7 +654,7 @@ concurrency.
 let handle = tokio::spawn(async { simple_operation().await });
 handle.await.unwrap();  // why not just await directly?
 
-// GOOD: direct await
+// GOOD: A direct `await`
 simple_operation().await;
 
 // GOOD: spawn for parallel execution
@@ -689,7 +695,7 @@ match handle.await {
     Ok(Ok(result)) => { /* task completed successfully */ }
     Ok(Err(e))     => { /* task returned an error */ }
     Err(join_err)  => {
-        // task panicked or was cancelled
+        // task panicked or it was canceled
         if join_err.is_panic() {
             error!("Task panicked: {:?}", join_err);
         }
