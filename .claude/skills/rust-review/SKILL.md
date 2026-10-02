@@ -51,6 +51,15 @@ and best practices.
 - [ ] Type signatures clearly express intent
 - [ ] Error type granularity is appropriate
 
+### Readability
+
+- [ ] No magic numbers; constants have descriptive names
+- [ ] `cargo clippy` produces zero warnings
+- [ ] `cargo fmt` has been applied
+- [ ] Doc comments are complete
+- [ ] Tests cover boundary conditions
+- [ ] Public APIs have documented examples
+
 ### Ownership and Borrowing
 
 - [ ] `clone()` is intentional and documented with a reason
@@ -67,20 +76,7 @@ and best practices.
 - [ ] Required invariants are listed
 - [ ] Unsafe boundary is as small as possible
 - [ ] Safe alternatives have been considered
-
-### Concurrency
-
-- [ ] Lock acquisition order is consistent
-- [ ] Channel buffer sizes are reasonable
-- [ ] `JoinHandle` results are handled properly
-- [ ] `join!` / `try_join!` preferred for structured concurrency
-
-### Cancellation Safety
-
-- [ ] Futures in `select!` are cancel-safe
-- [ ] Async functions document their cancel safety
-- [ ] Cancellation does not cause data loss or inconsistent state
-- [ ] `tokio::pin!` is used correctly for futures that need reuse
+- [ ] Unnecessary `unsafe` markers are removed
 
 ### Error Handling
 
@@ -93,20 +89,24 @@ and best practices.
 
 ### Performance
 
-- [ ] No unnecessary `collect()`
+- [ ] No unnecessary `collect()` or intermediate allocations
 - [ ] Large data passed by reference
-- [ ] Strings use `with_capacity` or `write!`
+- [ ] Strings use `&str`, `with_capacity`, `join`, or `write!` as appropriate
 - [ ] `impl Trait` vs `Box<dyn Trait>` choice is appropriate
 - [ ] Hot paths avoid allocations
-- [ ] `Cow` considered to reduce cloning
 
-### Code Quality
+### Trait Design
 
-- [ ] `cargo clippy` produces zero warnings
-- [ ] `cargo fmt` has been applied
-- [ ] Doc comments are complete
-- [ ] Tests cover boundary conditions
-- [ ] Public APIs have documented examples
+- [ ] Traits introduced only when genuine polymorphism is needed
+- [ ] Generics preferred over trait objects unless heterogeneous collections are required
+- [ ] `impl Trait` used in return position when concrete type is unimportant
+
+### Concurrency
+
+- [ ] Lock acquisition order is consistent
+- [ ] Channel buffer sizes are reasonable
+- [ ] `JoinHandle` results are handled properly
+- [ ] `join!` / `try_join!` preferred for structured concurrency
 
 ### Async
 
@@ -116,78 +116,307 @@ and best practices.
 - [ ] `spawn` is only used for genuinely parallel workloads
 - [ ] Simple operations are awaited directly, not spawned
 - [ ] Task lifecycle and shutdown strategy are considered
+- [ ] Futures in `select!` are cancel-safe
+- [ ] Async functions document their cancel safety
+- [ ] Cancellation does not cause data loss or inconsistent state
+- [ ] `tokio::pin!` is used correctly for futures that need reuse
 
-## Cargo review
-Based on analysis of Cargo.toml and the resulting `Cargo.lock`
+### Function Design
 
-### Unnecessary dependencies
-Identify dependencies that are unused or are only used in certain situations (dev, test, features, etc.), but they are
-not marked as optional.
+- [ ] Constructors use `Type::new()` or `Default::default()`
+- [ ] Free functions that take a type are candidates for methods
+- [ ] Similar functions are consolidated where possible
 
-### Dependencies could be combined
-The resulting set of dependencies in `Cargo.lock` file has multiple versions of the same crate that could be combined by
-modifying versions of the crate or parents of the crate controlled by the current project.
+### Type Design
 
-### Similar Dependencies
-The project uses multiple dependencies of a similar nature (e.g., error handling), and code modifications could 
-merge the dependencies into one reducing code size and build time.
+- [ ] Strong types used instead of primitive obsession
+- [ ] Groups of booleans replaced with enums where appropriate
+- [ ] TypeState pattern considered for stateful types
+
+### Cargo Review
+
+- [ ] No unused or unnecessarily non-optional dependencies
+- [ ] No duplicate crate versions that could be unified
+- [ ] No redundant dependencies that serve the same purpose
+
+---
 
 ## Readability
-### Avoid "Magic Numbers"
-Avoid the use of literals for important constants as their meaning is opaque. Replace them with the equivalent
-constant definition, where the constant's name describes the number more, and with a comment on its definition if needed.
 
-## Function level checks
+### Avoid magic numbers
+
+Avoid the use of literals for important constants as their meaning is opaque. Replace them with named
+constants whose names describe the value, with a comment on the definition if needed.
+
+```rust
+// BAD: meaning of 86400 is unclear at the call site
+fn is_expired(timestamp: u64, now: u64) -> bool {
+    now - timestamp > 86400
+}
+
+// GOOD: named constant makes intent obvious
+/// Number of seconds in one day.
+const SECONDS_PER_DAY: u64 = 86_400;
+
+fn is_expired(timestamp: u64, now: u64) -> bool {
+    now - timestamp > SECONDS_PER_DAY
+}
+```
+
+---
+
+## Function Design
 
 ### Constructors
-If a function instantiates a new instance of a type from the current crate, consider it as a possible constructor
-("new" or similar) that could be an associated function of the type in question. Consider a possible implementation
-of the Default::default trait for that type.
 
-### Free functions / Associated functions that could be methods
-If a function takes an instance of or a reference to a struct that is defined in the crate, consider it as a candidate
-for becoming a method of that type.
+If a function instantiates a new instance of a type from the current crate, consider making it an associated
+function (`new` or similar) on the type. Also consider implementing `Default::default` when there is a natural
+default state.
 
-## Function signature checks
+```rust
+// BAD: free function acting as constructor
+fn create_connection(host: &str, port: u16) -> Connection {
+    Connection { host: host.to_string(), port, retries: 3 }
+}
 
-## Line level checks
+// GOOD: associated constructor function
+impl Connection {
+    fn new(host: &str, port: u16) -> Self {
+        Self { host: host.to_string(), port, retries: 3 }
+    }
+}
 
-## Documentation / Doc-Test checks
+// GOOD: implement Default when a natural default exists
+impl Default for Connection {
+    fn default() -> Self {
+        Self { host: "localhost".to_string(), port: 8080, retries: 3 }
+    }
+}
+```
 
-## Overall design checks
+### Free functions that could be methods
 
-### Groups of booleans
-When there are a number of booleans that are checked together in some way to determine a state, or a setting,
-(especially when there are some combinations of the booleans that are not valid) consider the use of an enum to 
-succinctly capture the allowed states.
+If a function takes an instance of (or a reference to) a struct defined in the crate, it is a candidate for
+becoming a method on that type. Methods improve discoverability and allow method chaining.
 
-## Find errors at compile time
-### Low use of types 
-Functions create and process "types" with specific meaning and use, but they are represented by common types
-(e.g., Strings) that can be interchanged in function signatures and return types. Use strong types so that, for example, 
-an IP address cannot be confused with a file path.
+```rust
+// BAD: free function operating on a crate-local struct
+fn validate_order(order: &Order) -> Result<(), OrderError> {
+    if order.items.is_empty() { return Err(OrderError::Empty); }
+    Ok(())
+}
 
-### TypeState pattern
-When a type has boolean or other flags within it to indicate its state, and that is used to allow or deny certain
- operations, then consider the use of generics and the typestate pattern to avoid use of the type
-when it is in the incorrect stage.
-E.g., A Connection that has a "bound" or "connected" flag and sending data methods cannot be used unless
-in the "connected" state.
+// GOOD: method on the type
+impl Order {
+    fn validate(&self) -> Result<(), OrderError> {
+        if self.items.is_empty() { return Err(OrderError::Empty); }
+        Ok(())
+    }
+}
+```
+
+---
 
 ## Duplication
-### Repeated functions
-Identify repeated functions across the code base that can be pulled out to associated functions or helper methods.
 
-### Similar functions
-Identify similar functions (of a reasonable size/complexity) across the code based that share a lot of lines of code 
-and that could be combined with the use of an additional parameter to vary the behaviour.
+### Repeated and similar functions
+
+Identify repeated functions across the code base that can be pulled out to associated functions or helper
+methods. Also look for functions of reasonable size that share most of their logic and differ only in a small
+way -- these can often be combined with an additional parameter or a closure to vary the behavior.
+
+```rust
+// BAD: two nearly-identical functions
+fn send_email_notification(user: &User, message: &str) -> Result<()> {
+    let formatted = format!("Dear {}, {}", user.name, message);
+    email_client().send(&user.email, &formatted)?;
+    log::info!("Sent email to {}", user.name);
+    Ok(())
+}
+
+fn send_sms_notification(user: &User, message: &str) -> Result<()> {
+    let formatted = format!("Dear {}, {}", user.name, message);
+    sms_client().send(&user.phone, &formatted)?;
+    log::info!("Sent SMS to {}", user.name);
+    Ok(())
+}
+
+// GOOD: unified with a channel abstraction
+enum Channel { Email, Sms }
+
+fn send_notification(user: &User, message: &str, channel: Channel) -> Result<()> {
+    let formatted = format!("Dear {}, {}", user.name, message);
+    match channel {
+        Channel::Email => email_client().send(&user.email, &formatted)?,
+        Channel::Sms   => sms_client().send(&user.phone, &formatted)?,
+    }
+    log::info!("Sent {:?} notification to {}", channel, user.name);
+    Ok(())
+}
+```
+
+---
+
+## Type Design
+
+### Groups of booleans
+
+When several booleans are checked together to determine a state or setting -- especially when some
+combinations are invalid -- replace them with an enum that succinctly captures the allowed states.
+
+```rust
+// BAD: invalid combinations are representable (e.g., connected && !bound)
+struct Connection {
+    is_bound: bool,
+    is_connected: bool,
+    is_authenticated: bool,
+}
+
+// GOOD: only valid states are representable
+enum ConnectionState {
+    Unbound,
+    Bound { address: SocketAddr },
+    Connected { address: SocketAddr, stream: TcpStream },
+    Authenticated { address: SocketAddr, stream: TcpStream, token: Token },
+}
+```
+
+### Strong types over primitives
+
+Functions often create and process values with specific meaning -- IP addresses, file paths, user IDs -- but
+represent them as common types like `String` or `u64`. Use strong types so the compiler prevents mix-ups.
+
+```rust
+// BAD: all three parameters are Strings and can be swapped silently
+fn connect(host: String, path: String, token: String) { /* ... */ }
+
+// An accidental swap compiles fine:
+connect(token, host, path);  // wrong order, no compiler error
+
+// GOOD: distinct newtypes prevent misuse
+struct Host(String);
+struct FilePath(String);
+struct AuthToken(String);
+
+fn connect(host: Host, path: FilePath, token: AuthToken) { /* ... */ }
+// connect(token, host, path);  // compile error!
+```
+
+### TypeState pattern
+
+When a type has flags indicating its current state and certain operations are only valid in certain states,
+use generics and the TypeState pattern so the compiler enforces valid transitions.
+
+```rust
+use std::marker::PhantomData;
+
+// State marker types (zero-sized)
+struct Disconnected;
+struct Connected;
+
+struct Connection<S> {
+    addr: String,
+    _state: PhantomData<S>,
+}
+
+impl Connection<Disconnected> {
+    fn new(addr: &str) -> Self {
+        Connection { addr: addr.to_string(), _state: PhantomData }
+    }
+
+    fn connect(self) -> Result<Connection<Connected>, Error> {
+        // ... perform connection ...
+        Ok(Connection { addr: self.addr, _state: PhantomData })
+    }
+}
+
+impl Connection<Connected> {
+    fn send(&self, data: &[u8]) -> Result<(), Error> { /* ... */ Ok(()) }
+    fn disconnect(self) -> Connection<Disconnected> {
+        Connection { addr: self.addr, _state: PhantomData }
+    }
+}
+
+// conn.send(b"hello");          // compile error: not connected
+// conn.connect()?.send(b"hi");  // OK
+```
+
+---
+
+## Cargo Review
+
+Based on analysis of `Cargo.toml` and the resulting `Cargo.lock`.
+
+### Unnecessary dependencies
+
+Identify dependencies that are unused or are only needed in certain situations (dev, test, features) but are
+not marked as optional. Unnecessary dependencies increase compile time and binary size.
+
+```toml
+# BAD: dependency only used in tests but listed as a normal dependency
+[dependencies]
+mockall = "0.11"
+
+# GOOD: move to dev-dependencies
+[dev-dependencies]
+mockall = "0.11"
+
+# BAD: dependency only used behind a feature gate but not marked optional
+[dependencies]
+serde_yaml = "0.9"
+
+# GOOD: mark as optional and gate behind a feature
+[dependencies]
+serde_yaml = { version = "0.9", optional = true }
+
+[features]
+yaml = ["serde_yaml"]
+```
+
+### Duplicate crate versions
+
+The resulting set of dependencies in `Cargo.lock` may contain multiple versions of the same crate. Where
+possible, unify them by adjusting version requirements in `Cargo.toml` or updating intermediate crates
+controlled by the project.
+
+```toml
+# BAD: two different versions of the same crate pulled in
+# Cargo.lock contains both syn 1.0.109 and syn 2.0.38
+[dependencies]
+older-macro-lib = "0.5"   # depends on syn 1.x
+newer-derive = "1.0"      # depends on syn 2.x
+
+# GOOD: update older-macro-lib (if you control it) to syn 2.x,
+# or find a version of the dependency that uses the same syn version
+[dependencies]
+older-macro-lib = "0.6"   # updated to syn 2.x
+newer-derive = "1.0"
+```
+
+### Redundant dependencies
+
+The project uses multiple dependencies that serve the same purpose (e.g., two error-handling crates, two
+HTTP clients). Consolidating reduces code size, build time, and cognitive overhead.
+
+```toml
+# BAD: two HTTP clients
+[dependencies]
+reqwest = "0.11"
+hyper = { version = "0.14", features = ["client"] }
+
+# GOOD: pick one and use it consistently
+[dependencies]
+reqwest = "0.11"
+```
+
+---
 
 ## Ownership and Borrowing
 
 ### Avoid unnecessary clone()
 
-`clone()` is "Rust's duct tape" – used to bypass the borrow checker. During review, ask: is the clone necessary? 
-Could a borrow be used instead?
+`clone()` is "Rust's duct tape" -- used to bypass the borrow checker. During review, ask: is the clone
+necessary? Could a borrow be used instead?
 
 - Flag `clone()` calls that lack a justifying comment.
 - If a clone is genuinely needed (e.g., data moved to a spawned task), require a comment explaining why.
@@ -208,8 +437,9 @@ tokio::spawn(async move { process(owned).await });
 
 ### Arc<Mutex<T>> usage
 
-`Arc<Mutex<T>>` can hide unnecessary shared state. Review whether sharing is truly needed or if a single-owner design 
-would suffice. For concurrent access, consider finer-grained alternatives such as `DashMap`.
+`Arc<Mutex<T>>` can hide unnecessary shared state. Review whether sharing is truly needed or if a
+single-owner design would suffice. For concurrent access, consider finer-grained alternatives such as
+`DashMap`.
 
 ```rust
 // BAD: possibly unnecessary shared state
@@ -231,7 +461,9 @@ struct ConcurrentService {
 
 ### Cow (Copy-on-Write) pattern
 
-Use `Cow<'_, str>` (and similar) to avoid unnecessary allocations when the data may or may not need to be owned.
+Use `Cow<'_, str>` (and similar) to avoid unnecessary allocations when the data may or may not need to be
+owned. This is especially useful for functions that sometimes return borrowed data unchanged and sometimes
+need to allocate a modified copy.
 
 ```rust
 use std::borrow::Cow;
@@ -252,13 +484,49 @@ fn normalize_name(name: &str) -> Cow<'_, str> {
 }
 ```
 
+---
+
 ## Unsafe Code Review (Most Critical)
 
-### Unnecessary unsafe marker
-Determine if a function is marked as unsafe when it is not necessary
+### Unnecessary unsafe markers
+
+A function marked `unsafe` when it contains no operations that actually require `unsafe` forces callers
+into an `unsafe` block for no benefit. Remove the `unsafe` qualifier when the function body is entirely safe.
+
+```rust
+// BAD: function is marked unsafe but contains no unsafe operations
+unsafe fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+// GOOD: no unsafe qualifier needed
+fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+```
 
 ### Unnecessary unsafe code
-Find blocks or sections of unsafe code be replaced by safe code equivalents.
+
+Look for `unsafe` blocks that can be replaced by safe alternatives. The standard library and common crates
+often provide safe APIs that make manual unsafe code unnecessary.
+
+```rust
+// BAD: unsafe for something the standard library handles safely
+unsafe fn get_first(slice: &[u8]) -> u8 {
+    *slice.as_ptr()
+}
+
+// GOOD: safe equivalent
+fn get_first(slice: &[u8]) -> Option<u8> {
+    slice.first().copied()
+}
+
+// BAD: unsafe transmute for conversion
+let bytes: [u8; 4] = unsafe { std::mem::transmute(value) };
+
+// GOOD: safe conversion
+let bytes = value.to_ne_bytes();
+```
 
 ### Every unsafe block must have a SAFETY comment
 
@@ -293,7 +561,8 @@ unsafe fn documented_transmute<T, U>(t: T) -> U {
 
 ### Wrap unsafe in safe APIs
 
-Prefer encapsulating unsafe code behind a safe public API that enforces the required invariants at the boundary.
+Prefer encapsulating unsafe code behind a safe public API that enforces the required invariants at the
+boundary.
 
 ```rust
 // GOOD: safe wrapper around unsafe
@@ -309,7 +578,8 @@ pub fn checked_get(slice: &[u8], index: usize) -> Option<u8> {
 
 ### FFI boundaries
 
-Unsafe FFI calls should be wrapped in safe functions that validate inputs and translate error codes into `Result`.
+Unsafe FFI calls should be wrapped in safe functions that validate inputs and translate error codes into
+`Result`.
 
 ```rust
 extern "C" {
@@ -323,6 +593,8 @@ pub fn safe_wrapper(data: &[u8]) -> Result<i32, Error> {
     if result < 0 { Err(Error::from_code(result)) } else { Ok(result) }
 }
 ```
+
+---
 
 ## Error Handling
 
@@ -351,6 +623,9 @@ pub fn parse_config(s: &str) -> Result<Config, ConfigError> { /* ... */ }
 
 ### Preserve error context
 
+Always preserve the original error when adding context. Discarding the underlying error makes debugging
+much harder.
+
 ```rust
 // BAD: original error is lost
 operation().map_err(|_| anyhow!("failed"))?;
@@ -364,8 +639,8 @@ operation().with_context(|| format!("failed to process file: {}", filename))?;
 
 ### Error type design
 
-- Use `#[source]` to preserve the error chain.
-- Implement `From` for common conversions.
+Use `#[source]` to preserve the error chain and implement `From` for common conversions so the `?`
+operator works ergonomically.
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -389,9 +664,10 @@ pub enum ServiceError {
 
 ## Performance
 
-### Avoid unnecessary collect()
+### Avoid unnecessary collect() and intermediate allocations
 
-Do not materialize an intermediate `Vec` only to iterate over it again. Use lazy iterator chains.
+Do not materialize an intermediate `Vec` only to iterate over it again or to perform a simple check.
+Use lazy iterator chains and iterator methods like `any`, `all`, `find`, and `sum` directly.
 
 ```rust
 // BAD: unnecessary intermediate allocation
@@ -399,11 +675,32 @@ items.iter().filter(|x| **x > 0).collect::<Vec<_>>().iter().sum()
 
 // GOOD: lazy iteration
 items.iter().filter(|x| **x > 0).copied().sum()
+
+// BAD: allocating a Vec just to check if any element matches
+let filtered: Vec<_> = items.iter().filter(|i| i.is_valid()).collect();
+!filtered.is_empty()
+
+// GOOD: use iterator method
+items.iter().any(|i| i.is_valid())
+```
+
+### Avoid unnecessary String and &str allocations
+
+Strings are heap allocations. Prefer `&str` borrows when ownership is not needed, and use `&'static str`
+for compile-time constants so they live in the read-only data segment rather than being allocated at runtime.
+
+```rust
+// BAD: String::from for a static string when no owned String is needed
+fn bad_label() -> String { String::from("error message") }
+
+// GOOD: return &'static str
+fn good_label() -> &'static str { "error message" }
 ```
 
 ### String concatenation
 
-Avoid repeated allocations in loops. Use `.join("")`, `String::with_capacity`, or `write!`.
+Avoid repeated allocations when building strings in loops. Use `.join("")`, `String::with_capacity`, or
+`write!`.
 
 ```rust
 // BAD: re-allocates on every iteration
@@ -419,36 +716,14 @@ let mut result = String::with_capacity(total_len);
 for item in items { result.push_str(item); }
 ```
 
-### Avoid unnecessary String usage
-
-Strings are allocations on the HEAP. Avoid using a string when a &str can suffice. If they are constant, then
-&'static str to have them in the text segment and not allocated.
-
-### Avoid unnecessary allocations
-
-```rust
-// BAD: allocating a Vec just to check if any element matches
-let filtered: Vec<_> = items.iter().filter(|i| i.is_valid()).collect();
-!filtered.is_empty()
-
-// GOOD: use iterator method
-items.iter().any(|i| i.is_valid())
-
-// BAD: String::from for a static string when no owned String is needed
-fn bad_static() -> String { String::from("error message") }
-
-// GOOD: return &'static str
-fn good_static() -> &'static str { "error message" }
-```
-
 ---
 
 ## Trait Design
 
 ### Avoid over-abstraction
 
-Do not create traits for everything. Concrete types are simpler and faster. Only introduce a trait when genuine
-polymorphism is required.
+Do not create traits for everything. Concrete types are simpler and faster. Only introduce a trait when
+genuine polymorphism is required -- this is Rust, not Java.
 
 ```rust
 // BAD: trait soup -- not Java, no need to interface everything
@@ -470,16 +745,17 @@ impl DataProcessor {
 - Use `impl Trait` in return position when the concrete type is not important to the caller.
 
 ```rust
-// Prefer generics
-fn good_process<H: Handler>(handler: &H) { handler.handle(); }
+// Prefer generics (static dispatch, zero-cost)
+fn process<H: Handler>(handler: &H) { handler.handle(); }
 
 // Trait objects for heterogeneous collections
 fn store_handlers(handlers: Vec<Box<dyn Handler>>) { /* ... */ }
 
-// impl Trait return type
+// impl Trait return type -- hides concrete type from caller
 fn create_handler() -> impl Handler { ConcreteHandler::new() }
 ```
 
+---
 
 ## Async Code
 
@@ -546,6 +822,9 @@ async fn good_lock_tokio(mutex: &tokio::sync::Mutex<Data>) {
 
 ### Async trait methods
 
+Since Rust 1.75, async methods are supported natively in traits. For `dyn`-compatible scenarios, use
+`Pin<Box<dyn Future>>` since async methods are not object-safe.
+
 ```rust
 // Rust 1.75+: native async trait methods
 trait Repository {
@@ -559,11 +838,79 @@ trait DynRepository: Send + Sync {
 }
 ```
 
----
+### spawn vs. await
 
-## Cancellation Safety
+Do **not** spawn simple operations that can be directly awaited -- spawning adds overhead and loses
+structured concurrency. Use `spawn` for truly parallel execution (multiple independent I/O operations) or
+fire-and-forget background tasks.
 
-### What is cancellation safety?
+```rust
+// BAD: unnecessary spawn
+let handle = tokio::spawn(async { simple_operation().await });
+handle.await.unwrap();  // why not just await directly?
+
+// GOOD: A direct `await`
+simple_operation().await;
+
+// GOOD: spawn for parallel execution
+let task1 = tokio::spawn(fetch_from_service_a());
+let task2 = tokio::spawn(fetch_from_service_b());
+let (result1, result2) = tokio::try_join!(task1, task2)?;
+```
+
+### spawn's 'static requirement
+
+Spawned futures must be `'static`. Solutions:
+1. Clone the data.
+2. Use `Arc` for shared ownership.
+3. Use scoped task crates (`tokio-scoped`, `async-scoped`).
+
+```rust
+// BAD: borrowing non-'static data in spawn
+tokio::spawn(async { process(data).await });  // Error: `data` is not 'static
+
+// GOOD: clone or Arc
+let owned = data.clone();
+tokio::spawn(async move { process(&owned).await });
+
+let data = Arc::clone(&data);
+tokio::spawn(async move { process(&data).await });
+```
+
+### JoinHandle error handling
+
+Always handle `JoinHandle` results -- do not silently discard panics or errors.
+
+```rust
+// BAD: ignoring spawn errors
+let _ = handle.await;
+
+// GOOD: handle both task errors and join errors
+match handle.await {
+    Ok(Ok(result)) => { /* task completed successfully */ }
+    Ok(Err(e))     => { /* task returned an error */ }
+    Err(join_err)  => {
+        // task panicked or it was canceled
+        if join_err.is_panic() {
+            error!("Task panicked: {:?}", join_err);
+        }
+    }
+}
+```
+
+### Prefer structured concurrency
+
+Prefer `join!` / `try_join!` over raw `spawn` when all tasks share the same lifetime scope. With
+`try_join!`, if any task fails the others are cancelled.
+
+```rust
+// GOOD: structured concurrency
+tokio::try_join!(fetch_a(), fetch_b(), fetch_c())
+```
+
+When using `spawn`, consider the task lifecycle and have a shutdown strategy (graceful wait or abort).
+
+### Cancellation safety
 
 When a Future is dropped at an `.await` point, what state is it in?
 
@@ -627,7 +974,7 @@ loop {
 
 ### Document cancellation safety
 
-Every public async function should document its cancel safety behavior:
+Every public async function should document its cancel safety behavior.
 
 ```rust
 /// # Cancel Safety
@@ -637,80 +984,3 @@ Every public async function should document its cancel safety behavior:
 /// Use `read_message_cancel_safe` if cancellation is expected.
 async fn read_message(stream: &mut TcpStream) -> Result<Message> { /* ... */ }
 ```
-
----
-
-## spawn vs. await
-
-### When to use spawn
-
-- Do **not** spawn simple operations that can be directly awaited – spawning adds overhead and loses structured 
-concurrency.
-- Use `spawn` for truly parallel execution (multiple independent I/O operations).
-- Use `spawn` for fire-and-forget background tasks.
-
-```rust
-// BAD: unnecessary spawn
-let handle = tokio::spawn(async { simple_operation().await });
-handle.await.unwrap();  // why not just await directly?
-
-// GOOD: A direct `await`
-simple_operation().await;
-
-// GOOD: spawn for parallel execution
-let task1 = tokio::spawn(fetch_from_service_a());
-let task2 = tokio::spawn(fetch_from_service_b());
-let (result1, result2) = tokio::try_join!(task1, task2)?;
-```
-
-### spawn's 'static requirement
-
-Spawned futures must be `'static`. Solutions:
-1. Clone the data.
-2. Use `Arc` for shared ownership.
-3. Use scoped task crates (`tokio-scoped`, `async-scoped`).
-
-```rust
-// BAD: borrowing non-'static data in spawn
-tokio::spawn(async { process(data).await });  // Error: `data` is not 'static
-
-// GOOD: clone or Arc
-let owned = data.clone();
-tokio::spawn(async move { process(&owned).await });
-
-let data = Arc::clone(&data);
-tokio::spawn(async move { process(&data).await });
-```
-
-### JoinHandle error handling
-
-Always handle `JoinHandle` results -- do not silently discard panics or errors.
-
-```rust
-// BAD: ignoring spawn errors
-let _ = handle.await;
-
-// GOOD: handle both task errors and join errors
-match handle.await {
-    Ok(Ok(result)) => { /* task completed successfully */ }
-    Ok(Err(e))     => { /* task returned an error */ }
-    Err(join_err)  => {
-        // task panicked or it was canceled
-        if join_err.is_panic() {
-            error!("Task panicked: {:?}", join_err);
-        }
-    }
-}
-```
-
-### Prefer structured concurrency
-
-Prefer `join!` / `try_join!` over raw `spawn` when all tasks share the same lifetime scope. With `try_join!`, 
-if any task fails the others are cancelled.
-
-```rust
-// GOOD: structured concurrency
-tokio::try_join!(fetch_a(), fetch_b(), fetch_c())
-```
-
-When using `spawn`, consider the task lifecycle and have a shutdown strategy (graceful wait or abort).
